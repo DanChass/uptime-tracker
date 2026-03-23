@@ -1,0 +1,14 @@
+# Бинарники
+bin/
+tracker.exe
+tracker
+
+# Зависимости (если вдруг нужны)
+vendor/
+
+# Настройки IDE
+.vscode/
+.idea/
+
+# Логи
+*.log
