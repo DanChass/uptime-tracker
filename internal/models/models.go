@@ -10,7 +10,7 @@ type Site struct {
 
 // CheckResult описывает результат одной проверки (пинга)
 type CheckResult struct {
-	SiteID       int
+	URL          string
 	StatusCode   int           // HTTP статус (например, 200 или 404)
 	ResponseTime time.Duration // Время, за которое сайт ответил
 	IsUp         bool          // Доступен ли сайт
