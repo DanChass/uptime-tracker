@@ -8,29 +8,30 @@ import (
 
 	"github.com/DanChass/uptime-tracker/internal/checker"
 	"github.com/DanChass/uptime-tracker/internal/config"
+	"github.com/DanChass/uptime-tracker/internal/database"
 	"github.com/DanChass/uptime-tracker/internal/models"
 )
 
 func main() {
-	fmt.Println("Uptime Tracker запускается (Стадия 3.5: Конфигурация)...")
+	fmt.Println("Uptime Tracker запускается (Стадия 4: База данных)...")
 
-	// 1. Загружаем конфигурацию
 	cfg, err := config.LoadConfig("config.json")
 	if err != nil {
-		// log.Fatalf выведет ошибку и мгновенно завершит программу (код 1)
 		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
 
-	fmt.Printf("Загружено сайтов: %d, Таймаут: %d сек.\n\n", len(cfg.Sites), cfg.TimeoutSeconds)
+	// 1. Инициализируем БД
+	db, err := database.InitDB("tracker.db")
+	if err != nil {
+		log.Fatalf("Ошибка инициализации БД: %v", err)
+	}
+	defer db.Close()
 
-	// 2. Переводим секунды из конфига в тип time.Duration и создаем чекер
 	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
 	siteChecker := checker.NewChecker(timeout)
 
-	// Дальше логика остается почти без изменений, только используем cfg.Sites
 	results := make(chan models.CheckResult, len(cfg.Sites))
 	var wg sync.WaitGroup
-	startAll := time.Now()
 
 	for _, url := range cfg.Sites {
 		wg.Add(1)
@@ -43,6 +44,7 @@ func main() {
 	wg.Wait()
 	close(results)
 
+	fmt.Println("\n--- Результаты ---")
 	for result := range results {
 		status := "UP"
 		if !result.IsUp {
@@ -56,7 +58,10 @@ func main() {
 
 		fmt.Printf("[%s] %s | Статус: %d | Время: %v%s\n",
 			status, result.URL, result.StatusCode, result.ResponseTime, sslAlert)
-	}
 
-	fmt.Printf("\nВсе сайты проверены за: %v\n", time.Since(startAll))
+		// 2. Сохраняем в базу
+		if err := db.SaveResult(result); err != nil {
+			fmt.Printf("Ошибка записи в БД для %s: %v\n", result.URL, err)
+		}
+	}
 }
