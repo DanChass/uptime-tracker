@@ -1,0 +1,6 @@
+.git
+.vscode
+.idea
+tracker.db
+check_db.go
+README.md
