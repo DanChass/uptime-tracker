@@ -19,3 +19,4 @@ check_db.go
 
 # Базы данных
 *.db
+config.json

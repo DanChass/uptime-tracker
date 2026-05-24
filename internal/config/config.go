@@ -8,8 +8,10 @@ import (
 // Config описывает структуру нашего JSON файла.
 // Теги `json:"..."` подсказывают парсеру, из каких полей брать данные.
 type Config struct {
-	TimeoutSeconds int      `json:"timeout_seconds"`
 	Sites          []string `json:"sites"`
+	TimeoutSeconds int      `json:"timeout_seconds"`
+	TelegramToken  string   `json:"telegram_token"`   // Новое поле
+	TelegramChatID int64    `json:"telegram_chat_id"` // Новое поле
 }
 
 // LoadConfig читает файл по указанному пути и возвращает готовую структуру

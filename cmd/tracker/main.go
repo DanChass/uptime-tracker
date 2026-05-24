@@ -11,6 +11,7 @@ import (
 	"github.com/DanChass/uptime-tracker/internal/config"
 	"github.com/DanChass/uptime-tracker/internal/database"
 	"github.com/DanChass/uptime-tracker/internal/models"
+	"github.com/DanChass/uptime-tracker/internal/telegram"
 )
 
 func main() {
@@ -34,8 +35,8 @@ func main() {
 	go func() {
 		for {
 			fmt.Printf("\n[%s] Начинаем фоновую проверку сайтов...\n", time.Now().Format("15:04:05"))
-			runChecks(cfg.Sites, siteChecker, db)
-
+			// Передаем весь конфиг cfg целиком, чтобы внутри был доступ к токену
+			runChecks(cfg, siteChecker, db)
 			// Спим 30 секунд до следующей проверки (можно поменять)
 			time.Sleep(30 * time.Second)
 		}
@@ -51,11 +52,11 @@ func main() {
 }
 
 // runChecks делает ровно то, что раньше делал main: проверяет сайты и пишет в БД
-func runChecks(sites []string, siteChecker *checker.Checker, db *database.DB) {
-	results := make(chan models.CheckResult, len(sites))
+func runChecks(cfg *config.Config, siteChecker *checker.Checker, db *database.DB) {
+	results := make(chan models.CheckResult, len(cfg.Sites))
 	var wg sync.WaitGroup
 
-	for _, url := range sites {
+	for _, url := range cfg.Sites {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
@@ -67,8 +68,27 @@ func runChecks(sites []string, siteChecker *checker.Checker, db *database.DB) {
 	close(results)
 
 	for result := range results {
+		// 1. Пишем в базу
 		if err := db.SaveResult(result); err != nil {
 			fmt.Printf("Ошибка записи в БД для %s: %v\n", result.URL, err)
+		}
+
+		// 2. Если сайт упал или проблема с SSL — бьем тревогу в Telegram!
+		if !result.IsUp || result.SSLError {
+			alertMsg := fmt.Sprintf("🚨 <b>АЛЕРТ! Проблема с сайтом:</b>\n🌐 %s\nСтатус: %d\nВремя ответа: %v",
+				result.URL, result.StatusCode, result.ResponseTime)
+
+			if result.SSLError {
+				alertMsg += "\n⚠️ <i>Ошибка SSL сертификата!</i>"
+			}
+
+			// Отправляем сообщение
+			err := telegram.SendAlert(cfg.TelegramToken, cfg.TelegramChatID, alertMsg)
+			if err != nil {
+				fmt.Printf("❌ Ошибка отправки в ТГ для %s: %v\n", result.URL, err)
+			} else {
+				fmt.Printf("📩 Уведомление в ТГ отправлено для %s\n", result.URL)
+			}
 		}
 	}
 	fmt.Println("✅ Проверка завершена, данные в БД обновлены.")
