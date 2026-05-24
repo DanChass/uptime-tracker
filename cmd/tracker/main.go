@@ -2,60 +2,47 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"sync"
 	"time"
 
 	"github.com/DanChass/uptime-tracker/internal/checker"
+	"github.com/DanChass/uptime-tracker/internal/config"
 	"github.com/DanChass/uptime-tracker/internal/models"
 )
 
 func main() {
-	fmt.Println("Uptime Tracker запускается (Стадия 3: Асинхронность)...")
+	fmt.Println("Uptime Tracker запускается (Стадия 3.5: Конфигурация)...")
 
-	sites := []string{
-		"https://google.com",
-		"https://github.com",
-		"https://gosuslugi.ru",
-		"https://expired.badssl.com", // Сайт с плохим сертификатом
-		"http://this-site-is-fake-123.com",
+	// 1. Загружаем конфигурацию
+	cfg, err := config.LoadConfig("config.json")
+	if err != nil {
+		// log.Fatalf выведет ошибку и мгновенно завершит программу (код 1)
+		log.Fatalf("Ошибка загрузки конфига: %v", err)
 	}
 
-	siteChecker := checker.NewChecker()
+	fmt.Printf("Загружено сайтов: %d, Таймаут: %d сек.\n\n", len(cfg.Sites), cfg.TimeoutSeconds)
 
-	// 1. Создаем канал для сбора результатов.
-	// Длина канала равна количеству сайтов (буферизированный канал)
-	results := make(chan models.CheckResult, len(sites))
+	// 2. Переводим секунды из конфига в тип time.Duration и создаем чекер
+	timeout := time.Duration(cfg.TimeoutSeconds) * time.Second
+	siteChecker := checker.NewChecker(timeout)
 
-	// 2. Создаем группу ожидания
+	// Дальше логика остается почти без изменений, только используем cfg.Sites
+	results := make(chan models.CheckResult, len(cfg.Sites))
 	var wg sync.WaitGroup
-
-	// Засекаем общее время выполнения программы
 	startAll := time.Now()
 
-	// 3. Запускаем горутины в цикле
-	for _, url := range sites {
-		wg.Add(1) // Увеличиваем счетчик: +1 задача
-
-		// Запускаем анонимную функцию параллельно
-		// Передаем u (url) как аргумент, чтобы избежать бага замыкания
+	for _, url := range cfg.Sites {
+		wg.Add(1)
 		go func(u string) {
-			defer wg.Done() // В самом конце скажем: "Задача выполнена (-1)"
-
-			// Проверяем сайт
-			result := siteChecker.CheckSite(u)
-
-			// Отправляем результат в канал (в трубу)
-			results <- result
+			defer wg.Done()
+			results <- siteChecker.CheckSite(u)
 		}(url)
 	}
 
-	// 4. Ждем, пока все горутины не вызовут wg.Done()
 	wg.Wait()
-
-	// Закрываем канал (больше никто в него писать не будет)
 	close(results)
 
-	// 5. Вычитываем все результаты из канала
 	for result := range results {
 		status := "UP"
 		if !result.IsUp {
@@ -71,6 +58,5 @@ func main() {
 			status, result.URL, result.StatusCode, result.ResponseTime, sslAlert)
 	}
 
-	// Выводим общее время работы
 	fmt.Printf("\nВсе сайты проверены за: %v\n", time.Since(startAll))
 }

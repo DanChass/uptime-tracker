@@ -19,7 +19,7 @@ type Checker struct {
 	insecureClient *http.Client // Игнорирует сертификаты
 }
 
-func NewChecker() *Checker {
+func NewChecker(timeout time.Duration) *Checker {
 	rootCAs, _ := x509.SystemCertPool()
 	if rootCAs == nil {
 		rootCAs = x509.NewCertPool()
@@ -47,11 +47,11 @@ func NewChecker() *Checker {
 
 	return &Checker{
 		strictClient: &http.Client{
-			Timeout:   10 * time.Second,
+			Timeout:   timeout, // Используем переданный таймаут
 			Transport: strictTransport,
 		},
 		insecureClient: &http.Client{
-			Timeout:   10 * time.Second,
+			Timeout:   timeout, // Используем переданный таймаут
 			Transport: insecureTransport,
 		},
 	}

@@ -1,0 +1,10 @@
+{
+  "timeout_seconds": 10,
+  "sites": [
+    "https://google.com",
+    "https://github.com",
+    "https://gosuslugi.ru",
+    "https://expired.badssl.com",
+    "http://this-site-is-fake-123.com"
+  ]
+}
