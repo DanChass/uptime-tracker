@@ -5,91 +5,120 @@ import (
 	"crypto/x509"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/DanChass/uptime-tracker/internal/models"
 )
 
-// Указываю свой User-Agent
 const userAgent = "UptimeTrackerBot/1.0 (+https://github.com/DanChass/uptime-tracker)"
 
-// Checker - структура, которая хранит настроенного клиента
+// Checker теперь хранит два клиента
 type Checker struct {
-	client *http.Client
+	strictClient   *http.Client // Проверяет сертификаты
+	insecureClient *http.Client // Игнорирует сертификаты
 }
 
-// NewChecker - конструктор, который настраивает HTTP-клиент один раз
 func NewChecker() *Checker {
-	// 1. Берем системные сертификаты
 	rootCAs, _ := x509.SystemCertPool()
 	if rootCAs == nil {
 		rootCAs = x509.NewCertPool()
 	}
 
-	// 2. Пытаемся подгрузить сертификат Минцифры (если он лежит в корне проекта)
-	// Если файла нет, ошибка просто проигнорируется (err != nil), и сервис не упадет
 	certs, err := os.ReadFile("russian_trusted_root_ca.crt")
 	if err == nil {
 		rootCAs.AppendCertsFromPEM(certs)
 	}
 
-	// 3. Настраиваем транспорт
-	tlsConfig := &tls.Config{
-		RootCAs:            rootCAs,
-		InsecureSkipVerify: false, // Безопасность включена!
+	// Настройка для строгого клиента
+	strictTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			RootCAs:            rootCAs,
+			InsecureSkipVerify: false, // Безопасность ВКЛ
+		},
 	}
 
-	transport := &http.Transport{
-		TLSClientConfig: tlsConfig,
+	// Настройка для всеядного клиента
+	insecureTransport := &http.Transport{
+		TLSClientConfig: &tls.Config{
+			InsecureSkipVerify: true, // Безопасность ВЫКЛ (для второго шанса)
+		},
 	}
 
-	// 4. Собираем и возвращаем чекер
 	return &Checker{
-		client: &http.Client{
-			Timeout:   10 * time.Second, // Обязательный таймаут
-			Transport: transport,
+		strictClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: strictTransport,
+		},
+		insecureClient: &http.Client{
+			Timeout:   10 * time.Second,
+			Transport: insecureTransport,
 		},
 	}
 }
 
-// CheckSite - метод для проверки конкретного URL
 func (c *Checker) CheckSite(url string) models.CheckResult {
 	start := time.Now()
 
-	// Создаем запрос типа HEAD (вместо GET)
 	req, err := http.NewRequest(http.MethodHead, url, nil)
 	if err != nil {
-		return c.createErrorResult(url, start)
+		return c.createErrorResult(url, start, false)
 	}
-
-	// Устанавливаем наш кастомный User-Agent
 	req.Header.Set("User-Agent", userAgent)
 
-	// Выполняем запрос
-	resp, err := c.client.Do(req)
-	duration := time.Since(start)
+	// Попытка №1: Строгая проверка
+	resp, err := c.strictClient.Do(req)
 
 	if err != nil {
-		return c.createErrorResult(url, start)
+		// Анализируем ошибку. В Go сетевые ошибки оборачиваются,
+		// но текст "certificate" или "x509" надежно выдает проблемы с TLS.
+		if strings.Contains(err.Error(), "certificate") || strings.Contains(err.Error(), "x509") {
+			// Переходим к Попытке №2
+			return c.checkInsecure(req, url, start)
+		}
+
+		// Если это таймаут или нет интернета — сайт реально лежит
+		return c.createErrorResult(url, start, false)
 	}
 	defer resp.Body.Close()
 
 	return models.CheckResult{
 		URL:          url,
 		StatusCode:   resp.StatusCode,
-		ResponseTime: duration,
+		ResponseTime: time.Since(start),
 		IsUp:         resp.StatusCode >= 200 && resp.StatusCode < 400,
+		SSLError:     false,
 		CheckedAt:    time.Now(),
 	}
 }
 
-// Вспомогательный метод, чтобы не дублировать код при ошибках
-func (c *Checker) createErrorResult(url string, start time.Time) models.CheckResult {
+// checkInsecure выполняет скрытый запасной запрос
+func (c *Checker) checkInsecure(req *http.Request, url string, start time.Time) models.CheckResult {
+	resp, err := c.insecureClient.Do(req)
+
+	if err != nil {
+		// Сайт лежит окончательно (даже без проверки SSL не смогли достучаться)
+		return c.createErrorResult(url, start, true)
+	}
+	defer resp.Body.Close()
+
+	return models.CheckResult{
+		URL:          url,
+		StatusCode:   resp.StatusCode,
+		ResponseTime: time.Since(start), // Учитываем время обеих попыток
+		IsUp:         resp.StatusCode >= 200 && resp.StatusCode < 400,
+		SSLError:     true, // Ставим флаг для преподавателя!
+		CheckedAt:    time.Now(),
+	}
+}
+
+func (c *Checker) createErrorResult(url string, start time.Time, sslError bool) models.CheckResult {
 	return models.CheckResult{
 		URL:          url,
 		StatusCode:   0,
 		ResponseTime: time.Since(start),
 		IsUp:         false,
+		SSLError:     sslError,
 		CheckedAt:    time.Now(),
 	}
 }

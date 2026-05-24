@@ -14,5 +14,6 @@ type CheckResult struct {
 	StatusCode   int           // HTTP статус (например, 200 или 404)
 	ResponseTime time.Duration // Время, за которое сайт ответил
 	IsUp         bool          // Доступен ли сайт
+	SSLError     bool          // Флаг проблемы с сертификатом
 	CheckedAt    time.Time     // Время проверки
 }
