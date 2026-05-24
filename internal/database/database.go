@@ -2,6 +2,7 @@ package database
 
 import (
 	"database/sql"
+	"time"
 
 	"github.com/DanChass/uptime-tracker/internal/models"
 	_ "modernc.org/sqlite" // Анонимный импорт драйвера
@@ -57,4 +58,38 @@ func (d *DB) SaveResult(res models.CheckResult) error {
 	ms := res.ResponseTime.Milliseconds()
 	_, err := d.conn.Exec(query, res.URL, res.StatusCode, ms, res.IsUp, res.SSLError, res.CheckedAt)
 	return err
+}
+
+// GetRecentLogs возвращает последние N записей из базы
+func (d *DB) GetRecentLogs(limit int) ([]models.CheckResult, error) {
+	// Делаем SQL-запрос с сортировкой по убыванию ID
+	query := `
+	SELECT url, status_code, response_time_ms, is_up, ssl_error, checked_at 
+	FROM check_logs 
+	ORDER BY id DESC LIMIT ?`
+
+	rows, err := d.conn.Query(query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var logs []models.CheckResult
+
+	// Построчно читаем ответ от базы
+	for rows.Next() {
+		var res models.CheckResult
+		var ms int64
+
+		err := rows.Scan(&res.URL, &res.StatusCode, &ms, &res.IsUp, &res.SSLError, &res.CheckedAt)
+		if err != nil {
+			return nil, err
+		}
+
+		// Переводим миллисекунды обратно в тип time.Duration
+		res.ResponseTime = time.Duration(ms) * time.Millisecond
+		logs = append(logs, res)
+	}
+
+	return logs, nil
 }
